@@ -1,0 +1,168 @@
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+import pandas as pd
+from pyproj import CRS, Transformer
+import os
+import io
+
+# --------------------------------------------------
+# Core Conversion Function
+# --------------------------------------------------
+
+def process_dataframe(df, cm, utm_zone, output_dir):
+    required_cols = {"Point", "Easting", "Northing"}
+    if not required_cols.issubset(df.columns):
+        raise ValueError("Data must contain Point, Easting, Northing columns")
+
+    mutm = CRS.from_proj4(f"""
+    +proj=tmerc
+    +lat_0=0
+    +lon_0={cm}
+    +k=0.9999
+    +x_0=500000
+    +y_0=0
+    +a=6377276.345
+    +rf=300.8017
+    +towgs84=295,736,257
+    +units=m
+    +no_defs
+    """)
+
+    wgs84 = CRS.from_epsg(4326)
+    utm = CRS.from_epsg(32600 + utm_zone)
+
+    t1 = Transformer.from_crs(mutm, wgs84, always_xy=True)
+    t2 = Transformer.from_crs(wgs84, utm, always_xy=True)
+
+    lat, lon, ue, un = [], [], [], []
+
+    for _, r in df.iterrows():
+        lo, la = t1.transform(r["Easting"], r["Northing"])
+        e, n = t2.transform(lo, la)
+
+        lon.append(lo)
+        lat.append(la)
+        ue.append(e)
+        un.append(n)
+
+    df["WGS84_Latitude"] = lat
+    df["WGS84_Longitude"] = lon
+    df["UTM_Easting"] = ue
+    df["UTM_Northing"] = un
+    df["UTM_Zone"] = f"{utm_zone}N"
+
+    out_file = os.path.join(output_dir, "output_wgs84_utm.xlsx")
+    df.to_excel(out_file, index=False)
+
+    return out_file
+
+# --------------------------------------------------
+# GUI Actions
+# --------------------------------------------------
+
+def browse_file():
+    file_path = filedialog.askopenfilename(
+        filetypes=[("Data Files", "*.xlsx *.csv *.txt")]
+    )
+    entry_file.delete(0, tk.END)
+    entry_file.insert(0, file_path)
+
+def convert():
+    try:
+        cm = int(cm_var.get())
+        utm_zone = int(zone_var.get())
+        mode = input_mode.get()
+
+        if mode == "file":
+            path = entry_file.get()
+            if not path:
+                raise ValueError("Select an input file")
+
+            ext = os.path.splitext(path)[1].lower()
+            if ext == ".xlsx":
+                df = pd.read_excel(path)
+            elif ext == ".csv":
+                df = pd.read_csv(path)
+            elif ext == ".txt":
+                df = pd.read_csv(path, delim_whitespace=True)
+            else:
+                raise ValueError("Unsupported file format")
+
+            output_dir = os.path.dirname(path)
+
+        else:
+            text = text_input.get("1.0", tk.END).strip()
+            if not text:
+                raise ValueError("Enter coordinate data")
+
+            df = pd.read_csv(io.StringIO(text))
+            output_dir = os.getcwd()
+
+        out = process_dataframe(df, cm, utm_zone, output_dir)
+        messagebox.showinfo("Success", f"Conversion completed:\n{out}")
+
+    except Exception as e:
+        messagebox.showerror("Error", str(e))
+
+def toggle_mode():
+    if input_mode.get() == "file":
+        file_frame.pack(fill="x", padx=10, pady=5)
+        text_frame.pack_forget()
+    else:
+        text_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        file_frame.pack_forget()
+
+# --------------------------------------------------
+# GUI Layout
+# --------------------------------------------------
+
+root = tk.Tk()
+root.title("MUTM → WGS84 / UTM Converter")
+root.geometry("650x520")
+
+style = ttk.Style(root)
+style.theme_use("clam")
+
+# ---------- Input Mode ----------
+mode_frame = ttk.LabelFrame(root, text="Input Mode")
+mode_frame.pack(fill="x", padx=10, pady=8)
+
+input_mode = tk.StringVar(value="file")
+ttk.Radiobutton(mode_frame, text="Load from File", variable=input_mode, value="file", command=toggle_mode).pack(side="left", padx=10)
+ttk.Radiobutton(mode_frame, text="Manual Entry", variable=input_mode, value="manual", command=toggle_mode).pack(side="left", padx=10)
+
+# ---------- File Input ----------
+file_frame = ttk.Frame(root)
+file_frame.pack(fill="x", padx=10, pady=5)
+
+entry_file = ttk.Entry(file_frame, width=70)
+entry_file.pack(side="left", padx=5)
+ttk.Button(file_frame, text="Browse", command=browse_file).pack(side="left")
+
+# ---------- Text Input ----------
+text_frame = ttk.LabelFrame(root, text="Manual Coordinate Entry (CSV format)")
+text_input = tk.Text(text_frame, height=10, font=("Consolas", 10))
+text_input.pack(fill="both", expand=True, padx=5, pady=5)
+
+text_input.insert("1.0",
+"""Point,Easting,Northing
+P1,634413.7394,3064905.402
+P2,634027.2585,3065117.858
+""")
+
+# ---------- Settings ----------
+settings = ttk.LabelFrame(root, text="Projection Settings")
+settings.pack(fill="x", padx=10, pady=8)
+
+ttk.Label(settings, text="MUTM Central Meridian").grid(row=0, column=0, padx=10, pady=5, sticky="w")
+cm_var = tk.StringVar(value="84")
+ttk.Combobox(settings, textvariable=cm_var, values=["81", "84", "87"], width=10, state="readonly").grid(row=0, column=1)
+
+ttk.Label(settings, text="UTM Zone").grid(row=0, column=2, padx=10, pady=5, sticky="w")
+zone_var = tk.StringVar(value="45")
+ttk.Combobox(settings, textvariable=zone_var, values=["44", "45"], width=10, state="readonly").grid(row=0, column=3)
+
+# ---------- Action ----------
+ttk.Button(root, text="Convert Coordinates", command=convert).pack(pady=15)
+
+root.mainloop()

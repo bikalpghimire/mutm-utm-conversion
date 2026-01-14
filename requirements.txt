@@ -1,0 +1,4 @@
+pandas
+pyproj
+ttkbootstrap
+openpyxl
