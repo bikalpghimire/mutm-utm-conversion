@@ -9,8 +9,14 @@ from transform import transform_all
 from kml_export import export_to_kml
 
 
-APP_TITLE = "MUTM to UTM / WGS84 Coordinate Transformer"
+APP_TITLE = "Coordinate Transformer --- MUTM | UTM | WGS84 "
 FOOTER = "Prepared by: Bikalp Ghimire | Civil Engineer | Pumori Engineering Services (P) Ltd."
+
+MANUAL_PLACEHOLDER = (
+    "Example:\n"
+    "P1, 634413.7394, 3064905.402\n"
+    "634027.2585\t3065117.858"
+)
 
 
 def fmt_latlon(x): return f"{x:.8f}"
@@ -278,8 +284,16 @@ class App(ttk.Window):
         self.manual_frame = ttk.LabelFrame(self.input_container, text="Manual Coordinate Input")
         self.manual_frame.grid(row=0, column=0, sticky="nsew")
 
-        self.manual_text = ttk.Text(self.manual_frame, font=("Consolas", 11))
+        self.manual_text = ttk.Text(
+            self.manual_frame,
+            font=("Consolas", 11),
+            foreground="gray"
+        )
         self.manual_text.pack(fill=BOTH, expand=True, padx=padx, pady=pady)
+
+        # Insert placeholder
+        self.manual_text.insert("1.0", MANUAL_PLACEHOLDER)
+
 
         # File input
         self.file_frame = ttk.LabelFrame(self.input_container, text="File Input")
@@ -329,6 +343,20 @@ class App(ttk.Window):
         self.out_wgs = ttk.BooleanVar(value=True)
         self.out_utm = ttk.BooleanVar(value=True)
         self.out_mutm = ttk.BooleanVar(value=True)
+
+        def _clear_placeholder(event):
+            if self.manual_text.get("1.0", "end-1c") == MANUAL_PLACEHOLDER:
+                self.manual_text.delete("1.0", END)
+                self.manual_text.configure(foreground="black")
+
+        def _restore_placeholder(event):
+            if not self.manual_text.get("1.0", "end-1c").strip():
+                self.manual_text.insert("1.0", MANUAL_PLACEHOLDER)
+                self.manual_text.configure(foreground="gray")
+
+        self.manual_text.bind("<FocusIn>", _clear_placeholder)
+        self.manual_text.bind("<FocusOut>", _restore_placeholder)
+
 
         def system_block(parent, label_text, var):
             frame = ttk.Frame(parent)
@@ -432,6 +460,10 @@ class App(ttk.Window):
     # Main run
     # ==================================================
     def run(self):
+        text = self.manual_text.get("1.0", END)
+        if text.strip() == MANUAL_PLACEHOLDER.strip():
+            raise ValueError("Please enter coordinate data before transforming.")
+
         try:
             self._sync_output_checkboxes()
             # ---------- INPUT ----------
