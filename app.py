@@ -6,6 +6,8 @@ import pandas as pd
 
 from parser import parse_text, parse_file, dd_to_dms
 from transform import transform_all
+from kml_export import export_to_kml
+
 
 APP_TITLE = "MUTM to UTM / WGS84 Coordinate Transformer"
 FOOTER = "Prepared by: Bikalp Ghimire | Civil Engineer | Pumori Engineering Services (P) Ltd."
@@ -539,11 +541,47 @@ class App(ttk.Window):
                 else:
                     df_out[f"MUTM{z}_E"] = e
                     df_out[f"MUTM{z}_N"] = n
-
+            self.df_out = df_out
             self._show_preview(df_out, outputs)
 
         except Exception as e:
             messagebox.showerror("Error", str(e))
+    # ---- Export to KML ----
+    def export_kml(self):
+        if not hasattr(self, "df_out"):
+            messagebox.showwarning(
+                "No Data",
+                "Please run the conversion before exporting KML."
+            )
+            return
+
+        if "WGS84_Lat" not in self.df_out or "WGS84_Lon" not in self.df_out:
+            messagebox.showerror(
+                "Missing Data",
+                "WGS84 coordinates are required for KML export."
+            )
+            return
+
+        path = filedialog.asksaveasfilename(
+            defaultextension=".kml",
+            filetypes=[("KML files", "*.kml")]
+        )
+
+        if not path:
+            return
+
+        export_to_kml(
+            filepath=path,
+            names=self.df_out.get("Point", []),
+            lats=self.df_out["WGS84_Lat"],
+            lons=self.df_out["WGS84_Lon"],
+            crs_name=self.src_crs.get()
+        )
+
+        messagebox.showinfo(
+            "Export Complete",
+            f"KML file successfully saved:\n{path}"
+        )
 
     # ==================================================
     # Preview + export + copy headers
@@ -592,6 +630,7 @@ class App(ttk.Window):
             if path:
                 df.to_excel(path, index=False)
                 messagebox.showinfo("Exported", f"Saved to:\n{path}")
+        
 
         btns = ttk.Frame(win)
         btns.pack(pady=6)
@@ -601,6 +640,14 @@ class App(ttk.Window):
             bootstyle=SUCCESS,
             command=export_excel
         ).pack(side=LEFT, padx=10)
+
+        ttk.Button(
+            btns,
+            text="Export KML",
+            bootstyle=INFO,
+            command=self.export_kml
+        ).pack(side="left", padx=10)
+
 
         ttk.Button(
             btns, text="Close",
