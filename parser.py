@@ -1,67 +1,84 @@
-import pandas as pd
 import re
-import os
+import pandas as pd
 
-DMS_PATTERN = re.compile(
-    r"""(?P<deg>\d+)[°:\s]+(?P<min>\d+)[']?(?P<sec>[\d.]+)?["]?\s*(?P<hem>[NSEW])""",
-    re.IGNORECASE
-)
+# --------------------------------------------------
+# Helpers
+# --------------------------------------------------
 
-def dms_to_dd(text):
-    m = DMS_PATTERN.search(text.strip())
-    if not m:
-        return float(text)
+def clean_angle(val: str) -> float:
+    """
+    Cleans decimal degree input such as:
+    27.12568292°
+    27.12568292 º
+    """
+    return float(
+        val.replace("°", "")
+           .replace("º", "")
+           .strip()
+    )
 
-    deg = float(m.group("deg"))
-    minutes = float(m.group("min"))
-    seconds = float(m.group("sec") or 0)
-    hem = m.group("hem").upper()
 
-    dd = deg + minutes / 60 + seconds / 3600
-    if hem in ("S", "W"):
-        dd = -dd
-    return dd
+def dd_to_dms(dd, is_lat=True):
+    deg = int(abs(dd))
+    min_float = (abs(dd) - deg) * 60
+    minute = int(min_float)
+    sec = (min_float - minute) * 60
 
-def parse_text(text, source_crs):
+    hemi = (
+        "N" if dd >= 0 else "S"
+        if is_lat else
+        "E" if dd >= 0 else "W"
+    )
+
+    return f"{deg}°{minute}'{sec:.4f}\" {hemi}"
+
+
+# --------------------------------------------------
+# Manual text parsing
+# --------------------------------------------------
+
+def parse_text(text: str, src_crs: str):
     rows = []
-    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    for line in text.splitlines():
+        if not line.strip():
+            continue
 
-    for i, line in enumerate(lines, start=1):
-        parts = re.split(r"[,\s\t]+", line)
+        parts = re.split(r"[,\t ]+", line.strip())
 
         if len(parts) == 2:
-            name = f"P{i}"
+            name = ""
             x, y = parts
-        elif len(parts) >= 3:
-            name, x, y = parts[:3]
         else:
-            raise ValueError(f"Invalid line: {line}")
+            name = parts[0]
+            x, y = parts[1], parts[2]
 
-        if source_crs == "WGS84":
-            x = dms_to_dd(x)
-            y = dms_to_dd(y)
-
-        rows.append([name, float(x), float(y)])
+        rows.append([
+            name,
+            clean_angle(x),
+            clean_angle(y)
+        ])
 
     return pd.DataFrame(rows, columns=["Point", "X", "Y"])
 
-def parse_file(path):
-    ext = os.path.splitext(path)[1].lower()
 
-    if ext == ".xlsx":
+# --------------------------------------------------
+# File parsing
+# --------------------------------------------------
+
+def parse_file(path: str):
+    if path.lower().endswith(".xlsx"):
         df = pd.read_excel(path)
-    elif ext == ".csv":
-        df = pd.read_csv(path)
-    elif ext == ".txt":
-        df = pd.read_csv(path, sep=r"[,\s\t]+", engine="python", header=None)
     else:
-        raise ValueError("Unsupported file format")
+        df = pd.read_csv(path)
 
-    if df.shape[1] == 2:
-        df.insert(0, "Point", [f"P{i+1}" for i in range(len(df))])
-        df.columns = ["Point", "X", "Y"]
-    elif df.shape[1] >= 3:
-        df = df.iloc[:, :3]
-        df.columns = ["Point", "X", "Y"]
+    df.columns = [c.strip() for c in df.columns]
+
+    if len(df.columns) == 2:
+        df.insert(0, "Point", "")
+
+    df.columns = ["Point", "X", "Y"]
+
+    df["X"] = df["X"].astype(str).apply(clean_angle)
+    df["Y"] = df["Y"].astype(str).apply(clean_angle)
 
     return df

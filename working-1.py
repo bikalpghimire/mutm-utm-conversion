@@ -14,48 +14,6 @@ def fmt_latlon(x): return f"{x:.8f}"
 def fmt_xy(x): return f"{x:.4f}"
 
 
-# ==================================================
-# AUTO-DETECT COORDINATE ORDER
-# ==================================================
-def detect_order_series(xs, ys, src_crs):
-    """
-    Robust auto-detection of coordinate order.
-    Returns: "EN", "NE", "LATLON", "LONLAT"
-    """
-
-    counts = {"EN": 0, "NE": 0, "LATLON": 0, "LONLAT": 0}
-
-    for x, y in zip(xs, ys):
-        if pd.isna(x) or pd.isna(y):
-            continue
-
-        ax, ay = abs(x), abs(y)
-
-        # ---- WGS84 ----
-        if src_crs == "WGS84":
-            if ax <= 90 and ay > 90:
-                counts["LATLON"] += 1
-            elif ax > 90 and ay <= 90:
-                counts["LONLAT"] += 1
-
-        # ---- PROJECTED (UTM / MUTM) ----
-        else:
-            # Northing is always larger than Easting
-            if ax < ay:
-                counts["EN"] += 1
-            else:
-                counts["NE"] += 1
-
-    detected = max(counts, key=counts.get)
-
-    # Safe fallback
-    if counts[detected] == 0:
-        return "LATLON" if src_crs == "WGS84" else "EN"
-
-    return detected
-
-
-
 class App(ttk.Window):
     def __init__(self):
         super().__init__(themename="flatly")
@@ -73,19 +31,30 @@ class App(ttk.Window):
         self.grid_rowconfigure(2, weight=1)
 
         # --------------------------------------------------
-        # Source CRS
+        # Source CRS + Order
         # --------------------------------------------------
         src = ttk.LabelFrame(self, text="Source Coordinate System")
         src.grid(row=0, column=0, sticky="ew", padx=padx, pady=(pady, 4))
+        src.grid_columnconfigure(0, weight=1)
+
+        top = ttk.Frame(src)
+        top.grid(row=0, column=0, sticky="w", padx=padx, pady=4)
 
         self.src_crs = ttk.Combobox(
-            src,
+            top,
             values=["MUTM81", "MUTM84", "MUTM87", "WGS84", "UTM44", "UTM45"],
             state="readonly",
             width=16
         )
         self.src_crs.set("MUTM84")
-        self.src_crs.pack(anchor="w", padx=padx, pady=6)
+        self.src_crs.pack(side=LEFT, padx=(0, 20))
+        self.src_crs.bind("<<ComboboxSelected>>", self._update_order_labels)
+
+        self.coord_order = ttk.StringVar(value="XY")
+        self.rb1 = ttk.Radiobutton(top, variable=self.coord_order, value="XY")
+        self.rb2 = ttk.Radiobutton(top, variable=self.coord_order, value="YX")
+        self.rb1.pack(side=LEFT)
+        self.rb2.pack(side=LEFT, padx=(10, 0))
 
         # --------------------------------------------------
         # Input type
@@ -136,7 +105,7 @@ class App(ttk.Window):
             text=(
                 "Expected file format:\n"
                 "• Columns: Point, X, Y  (or X, Y)\n"
-                "• Coordinate order auto-detected from numeric ranges\n"
+                "• Order auto-detected from headers if possible\n"
                 "• Supported formats: .txt, .csv, .xlsx"
             ),
             foreground="gray",
@@ -164,7 +133,9 @@ class App(ttk.Window):
             header = ttk.Frame(frame)
             header.pack(anchor="w")
 
-            ttk.Checkbutton(header, variable=var).pack(side=LEFT)
+            chk = ttk.Checkbutton(header, variable=var)
+            chk.pack(side=LEFT)
+
             lbl = ttk.Label(header, text=label_text,
                             font=("TkDefaultFont", 10, "bold"))
             lbl.pack(side=LEFT, padx=(4, 0))
@@ -187,7 +158,6 @@ class App(ttk.Window):
         wgs = ttk.Frame(out)
         wgs.grid(row=0, column=0, sticky="w", padx=30)
         wgs_opts = system_block(wgs, "WGS84", self.out_wgs)
-
         self.wgs_fmt = ttk.StringVar(value="DD")
         ttk.Radiobutton(wgs_opts, text="Decimal Degrees",
                         variable=self.wgs_fmt, value="DD").pack(anchor="w")
@@ -198,7 +168,6 @@ class App(ttk.Window):
         utm = ttk.Frame(out)
         utm.grid(row=0, column=1, sticky="w", padx=30)
         utm_opts = system_block(utm, "UTM", self.out_utm)
-
         self.utm_zone = ttk.StringVar(value="45")
         ttk.Radiobutton(utm_opts, text="Zone 44",
                         variable=self.utm_zone, value="44").pack(anchor="w")
@@ -209,7 +178,6 @@ class App(ttk.Window):
         mutm = ttk.Frame(out)
         mutm.grid(row=0, column=2, sticky="w", padx=30)
         mutm_opts = system_block(mutm, "MUTM", self.out_mutm)
-
         self.mutm_zone = ttk.StringVar(value="84")
         for cm in ("81", "84", "87"):
             ttk.Radiobutton(mutm_opts, text=f"CM {cm}",
@@ -228,7 +196,17 @@ class App(ttk.Window):
 
         ttk.Label(self, text=FOOTER, foreground="gray").grid(row=5, column=0, pady=(0, 6))
 
+        self._update_order_labels()
+
     # ==================================================
+    def _update_order_labels(self, *_):
+        if self.src_crs.get() == "WGS84":
+            self.rb1.configure(text="Lon, Lat")
+            self.rb2.configure(text="Lat, Lon")
+        else:
+            self.rb1.configure(text="E, N")
+            self.rb2.configure(text="N, E")
+
     def _toggle_mode(self):
         if self.mode.get() == "file":
             self.manual_frame.grid_remove()
@@ -251,23 +229,15 @@ class App(ttk.Window):
     def run(self):
         try:
             # ---------- INPUT ----------
-            df_in = (
-                parse_text(self.manual_text.get("1.0", END), self.src_crs.get())
-                if self.mode.get() == "manual"
-                else parse_file(self.file_entry.get())
-            )
-
-            # Auto-detect order using ALL rows (robust)
-            order = detect_order_series(
-                df_in["X"].astype(float),
-                df_in["Y"].astype(float),
-                self.src_crs.get()
-            )
-
-
-            # Normalize internal order → X = E/Lon, Y = N/Lat
-            if order in ("NE", "LATLON"):
-                df_in[["X", "Y"]] = df_in[["Y", "X"]]
+            if self.mode.get() == "manual":
+                df_in = parse_text(self.manual_text.get("1.0", END), self.src_crs.get())
+                if self.coord_order.get() == "YX":
+                    df_in[["X", "Y"]] = df_in[["Y", "X"]]
+            else:
+                df_in = parse_file(self.file_entry.get())
+                headers = [c.lower() for c in df_in.columns]
+                if headers[1:3] in (["lat", "lon"], ["n", "e"]):
+                    df_in[["X", "Y"]] = df_in[["Y", "X"]]
 
             # ---------- TRANSFORM ----------
             rows = transform_all(
@@ -284,6 +254,7 @@ class App(ttk.Window):
                 "MUTM_E", "MUTM_N", "MUTM_CM"
             ])
 
+
             src = self.src_crs.get()
             df_out = pd.DataFrame()
             df_out["Point"] = df_in["Point"]
@@ -292,46 +263,55 @@ class App(ttk.Window):
 
             outputs = []
 
-            # ---------- WGS84 ----------
             if self.out_wgs.get():
                 outputs.append("WGS84")
+
                 lat = df_all["WGS84_Lat"].apply(fmt_latlon)
                 lon = df_all["WGS84_Lon"].apply(fmt_latlon)
 
-                if order == "LONLAT":
+                # Default WGS84 order = Lat, Lon
+                if self.src_crs.get() == "WGS84" and self.coord_order.get() == "XY":
+                    # Lon, Lat input → Lon, Lat output
                     df_out["WGS84_Lon"] = lon
                     df_out["WGS84_Lat"] = lat
                 else:
+                    # Default → Lat, Lon
                     df_out["WGS84_Lat"] = lat
                     df_out["WGS84_Lon"] = lon
 
-            # ---------- UTM ----------
+
             if self.out_utm.get():
                 z = self.utm_zone.get()
                 outputs.append(f"UTM{z}")
+
                 e = df_all["UTM_E"].apply(fmt_xy)
                 n = df_all["UTM_N"].apply(fmt_xy)
 
-                if order == "NE":
+                if self.coord_order.get() == "YX":
+                    # N, E
                     df_out[f"UTM{z}_N"] = n
                     df_out[f"UTM{z}_E"] = e
                 else:
+                    # E, N
                     df_out[f"UTM{z}_E"] = e
                     df_out[f"UTM{z}_N"] = n
 
-            # ---------- MUTM ----------
             if self.out_mutm.get():
                 z = self.mutm_zone.get()
                 outputs.append(f"MUTM{z}")
+
                 e = df_all["MUTM_E"].apply(fmt_xy)
                 n = df_all["MUTM_N"].apply(fmt_xy)
 
-                if order == "NE":
+                if self.coord_order.get() == "YX":
+                    # N, E
                     df_out[f"MUTM{z}_N"] = n
                     df_out[f"MUTM{z}_E"] = e
                 else:
+                    # E, N
                     df_out[f"MUTM{z}_E"] = e
                     df_out[f"MUTM{z}_N"] = n
+
 
             self._show_preview(df_out, outputs)
 
@@ -366,17 +346,22 @@ class App(ttk.Window):
         for _, r in df.iterrows():
             tree.insert("", END, values=list(r))
 
-        # ---- Copy including headers ----
         def copy_selected(event=None):
-            rows = ["\t".join(df.columns)]
-            for i in tree.selection():
-                rows.append("\t".join(map(str, tree.item(i)["values"])))
+            items = tree.selection()
+            rows = []
+
+            if not items:
+                rows.append("\t".join(df.columns))
+            else:
+                rows.append("\t".join(df.columns))
+                for i in items:
+                    rows.append("\t".join(map(str, tree.item(i)["values"])))
+
             win.clipboard_clear()
             win.clipboard_append("\n".join(rows))
 
         tree.bind("<Control-c>", copy_selected)
 
-        # ---- Export to Excel ----
         def export_excel():
             path = filedialog.asksaveasfilename(
                 defaultextension=".xlsx",
@@ -389,16 +374,9 @@ class App(ttk.Window):
         btns = ttk.Frame(win)
         btns.pack(pady=6)
 
-        ttk.Button(
-            btns, text="Export to Excel",
-            bootstyle=SUCCESS,
-            command=export_excel
-        ).pack(side=LEFT, padx=10)
-
-        ttk.Button(
-            btns, text="Close",
-            command=win.destroy
-        ).pack(side=LEFT, padx=10)
+        ttk.Button(btns, text="Export to Excel",
+                   bootstyle=SUCCESS, command=export_excel).pack(side=LEFT, padx=10)
+        ttk.Button(btns, text="Close", command=win.destroy).pack(side=LEFT, padx=10)
 
 
 if __name__ == "__main__":
