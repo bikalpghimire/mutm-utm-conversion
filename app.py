@@ -17,42 +17,44 @@ def fmt_xy(x): return f"{x:.4f}"
 # ==================================================
 # AUTO-DETECT COORDINATE ORDER
 # ==================================================
-def detect_order_series(xs, ys, src_crs):
+
+def check_consistent_order(xs, ys, src_crs):
     """
-    Robust auto-detection of coordinate order.
-    Returns: "EN", "NE", "LATLON", "LONLAT"
+    Determines and enforces consistent coordinate order.
+    Nepal-specific rule:
+    - WGS84: |Latitude| < |Longitude|
+    - Projected: |Easting| < |Northing|
     """
 
-    counts = {"EN": 0, "NE": 0, "LATLON": 0, "LONLAT": 0}
+    detected = []
 
-    for x, y in zip(xs, ys):
+    for i, (x, y) in enumerate(zip(xs, ys), start=1):
         if pd.isna(x) or pd.isna(y):
             continue
 
         ax, ay = abs(x), abs(y)
 
-        # ---- WGS84 ----
+        # ---------------- WGS84 (Nepal-specific) ----------------
         if src_crs == "WGS84":
-            if ax <= 90 and ay > 90:
-                counts["LATLON"] += 1
-            elif ax > 90 and ay <= 90:
-                counts["LONLAT"] += 1
+            detected.append("LATLON" if ax < ay else "LONLAT")
 
-        # ---- PROJECTED (UTM / MUTM) ----
+        # ---------------- Projected (UTM / MUTM) ----------------
         else:
-            # Northing is always larger than Easting
-            if ax < ay:
-                counts["EN"] += 1
-            else:
-                counts["NE"] += 1
+            detected.append("EN" if ax < ay else "NE")
 
-    detected = max(counts, key=counts.get)
+    if not detected:
+        raise ValueError("No valid coordinate rows found.")
 
-    # Safe fallback
-    if counts[detected] == 0:
-        return "LATLON" if src_crs == "WGS84" else "EN"
+    first = detected[0]
+    for d in detected:
+        if d != first:
+            raise ValueError(
+                "Inconsistent coordinate order detected.\n\n"
+                "Some rows appear as X,Y while others appear as Y,X.\n"
+                "Please ensure all rows use the same coordinate order."
+            )
 
-    return detected
+    return first
 
 
 
@@ -60,8 +62,8 @@ class App(ttk.Window):
     def __init__(self):
         super().__init__(themename="flatly")
         self.title(APP_TITLE)
-        self.geometry("1200x820")
-        self.minsize(1100, 740)
+        self.geometry("800x500")
+        self.minsize(600, 500)
         self._build_ui()
 
     # ==================================================
@@ -86,6 +88,12 @@ class App(ttk.Window):
         )
         self.src_crs.set("MUTM84")
         self.src_crs.pack(anchor="w", padx=padx, pady=6)
+
+        self.src_crs.bind(
+            "<<ComboboxSelected>>",
+            lambda e: self._sync_output_checkboxes()
+        )
+
 
         # --------------------------------------------------
         # Input type
@@ -125,24 +133,32 @@ class App(ttk.Window):
         file_row.grid(row=0, column=0, sticky="ew", padx=padx, pady=(pady, 2))
         file_row.grid_columnconfigure(0, weight=1)
 
-        self.file_entry = ttk.Entry(file_row)
+        self.file_entry = ttk.Entry(
+            file_row,
+            foreground="gray"
+        )
+        self.file_entry.insert(0, ".csv, .xlsx, .txt")
         self.file_entry.grid(row=0, column=0, sticky="ew")
+
 
         ttk.Button(file_row, text="Browse",
                    command=self._browse).grid(row=0, column=1, padx=(8, 0))
 
         self.file_info = ttk.Label(
             self.file_frame,
-            text=(
-                "Expected file format:\n"
-                "• Columns: Point, X, Y  (or X, Y)\n"
-                "• Coordinate order auto-detected from numeric ranges\n"
-                "• Supported formats: .txt, .csv, .xlsx"
-            ),
-            foreground="gray",
-            justify="left"
+            text="Expected format: (Point, Value1, Value2) or (Value1, Value2)",
+            foreground="gray"
         )
+
         self.file_info.grid(row=1, column=0, sticky="w", padx=padx, pady=(4, 6))
+
+        self.has_header = ttk.BooleanVar(value=True)
+
+        ttk.Checkbutton(
+            self.file_frame,
+            text="File has header row",
+            variable=self.has_header
+        ).grid(row=2, column=0, sticky="w", padx=padx, pady=(0, 6))
 
         self.file_frame.grid_remove()
 
@@ -227,6 +243,7 @@ class App(ttk.Window):
         ).grid(row=4, column=0, pady=10)
 
         ttk.Label(self, text=FOOTER, foreground="gray").grid(row=5, column=0, pady=(0, 6))
+        self._sync_output_checkboxes()
 
     # ==================================================
     def _toggle_mode(self):
@@ -236,6 +253,14 @@ class App(ttk.Window):
         else:
             self.file_frame.grid_remove()
             self.manual_frame.grid()
+
+    def _sync_output_checkboxes(self):
+        src = self.src_crs.get()
+
+        self.out_wgs.set(src != "WGS84")
+        self.out_utm.set(not src.startswith("UTM"))
+        self.out_mutm.set(not src.startswith("MUTM"))
+
 
     def _browse(self):
         f = filedialog.askopenfilename(
@@ -250,19 +275,21 @@ class App(ttk.Window):
     # ==================================================
     def run(self):
         try:
+            self._sync_output_checkboxes()
             # ---------- INPUT ----------
             df_in = (
                 parse_text(self.manual_text.get("1.0", END), self.src_crs.get())
                 if self.mode.get() == "manual"
-                else parse_file(self.file_entry.get())
+                else parse_file(self.file_entry.get(), self.has_header.get())
             )
 
-            # Auto-detect order using ALL rows (robust)
-            order = detect_order_series(
+            # Ensure ALL rows use the same order
+            order = check_consistent_order(
                 df_in["X"].astype(float),
                 df_in["Y"].astype(float),
                 self.src_crs.get()
             )
+
 
 
             # Normalize internal order → X = E/Lon, Y = N/Lat
@@ -287,16 +314,39 @@ class App(ttk.Window):
             src = self.src_crs.get()
             df_out = pd.DataFrame()
             df_out["Point"] = df_in["Point"]
-            df_out[f"{src}_X"] = df_in["X"].apply(fmt_xy)
-            df_out[f"{src}_Y"] = df_in["Y"].apply(fmt_xy)
+
+            src = self.src_crs.get()
+
+            # ---------------- INPUT COLUMN NAMES ----------------
+            if src == "WGS84":
+                if order == "LATLON":
+                    df_out["WGS84_Lat"] = df_in["Y"].apply(fmt_latlon)
+                    df_out["WGS84_Lon"] = df_in["X"].apply(fmt_latlon)
+                else:  # LONLAT
+                    df_out["WGS84_Lon"] = df_in["X"].apply(fmt_latlon)
+                    df_out["WGS84_Lat"] = df_in["Y"].apply(fmt_latlon)
+
+            else:
+                # MUTM / UTM → preserve original order
+                if order == "EN":
+                    df_out[f"{src}_E"] = df_in["X"].apply(fmt_xy)
+                    df_out[f"{src}_N"] = df_in["Y"].apply(fmt_xy)
+                else:  # NE
+                    df_out[f"{src}_N"] = df_in["Y"].apply(fmt_xy)
+                    df_out[f"{src}_E"] = df_in["X"].apply(fmt_xy)
 
             outputs = []
 
             # ---------- WGS84 ----------
             if self.out_wgs.get():
                 outputs.append("WGS84")
-                lat = df_all["WGS84_Lat"].apply(fmt_latlon)
-                lon = df_all["WGS84_Lon"].apply(fmt_latlon)
+
+                if self.wgs_fmt.get() == "DMS":
+                    lat = df_all["WGS84_Lat"].apply(lambda v: dd_to_dms(v, is_lat=True))
+                    lon = df_all["WGS84_Lon"].apply(lambda v: dd_to_dms(v, is_lat=False))
+                else:
+                    lat = df_all["WGS84_Lat"].apply(fmt_latlon)
+                    lon = df_all["WGS84_Lon"].apply(fmt_latlon)
 
                 if order == "LONLAT":
                     df_out["WGS84_Lon"] = lon
@@ -304,6 +354,7 @@ class App(ttk.Window):
                 else:
                     df_out["WGS84_Lat"] = lat
                     df_out["WGS84_Lon"] = lon
+
 
             # ---------- UTM ----------
             if self.out_utm.get():
