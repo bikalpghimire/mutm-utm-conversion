@@ -55,7 +55,7 @@ def make_mutm_with_towgs(cm: int):
     +y_0=0
     +a=6377276.345
     +rf=300.8017
-    +towgs84=293.17, 726.18, 245.36
+    +towgs84=295, 736, 257
     +units=m
     +no_defs
     """)

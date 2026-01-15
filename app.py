@@ -136,7 +136,7 @@ class StartupWindow(ttk.Toplevel):
         ).pack(anchor="w", pady=(8, 2))
 
         datum = ttk.Entry(container)
-        datum.insert(0, "TOWGS84 = (293.17, 726.18, 245.36)")
+        datum.insert(0, "TOWGS84 = (295, 736, 257)")
         datum.configure(state="readonly")
         datum.pack(anchor="w", fill="x", padx=(10, 0))
 
