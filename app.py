@@ -284,6 +284,7 @@ class App(ttk.Window):
         self.manual_frame = ttk.LabelFrame(self.input_container, text="Manual Coordinate Input")
         self.manual_frame.grid(row=0, column=0, sticky="nsew")
 
+        # ---- Manual input Text widget (placeholder in gray) ----
         self.manual_text = ttk.Text(
             self.manual_frame,
             font=("Consolas", 11),
@@ -293,6 +294,21 @@ class App(ttk.Window):
 
         # Insert placeholder
         self.manual_text.insert("1.0", MANUAL_PLACEHOLDER)
+
+        # ---- Placeholder behavior ----
+        def _clear_placeholder(event):
+            if self.manual_text.get("1.0", "end-1c") == MANUAL_PLACEHOLDER:
+                self.manual_text.delete("1.0", END)
+                self.manual_text.configure(foreground="black")
+
+        def _restore_placeholder(event):
+            if not self.manual_text.get("1.0", "end-1c").strip():
+                self.manual_text.insert("1.0", MANUAL_PLACEHOLDER)
+                self.manual_text.configure(foreground="gray")
+
+        self.manual_text.bind("<FocusIn>", _clear_placeholder)
+        self.manual_text.bind("<FocusOut>", _restore_placeholder)
+
 
 
         # File input
@@ -308,8 +324,28 @@ class App(ttk.Window):
             file_row,
             foreground="gray"
         )
-        self.file_entry.insert(0, ".csv, .xlsx, .txt")
         self.file_entry.grid(row=0, column=0, sticky="ew")
+
+        # ---- File entry placeholder behavior ----
+        FILE_PLACEHOLDER = ".csv, .xlsx, .txt"
+
+        self.file_entry.delete(0, END)
+        self.file_entry.insert(0, FILE_PLACEHOLDER)
+        self.file_entry.configure(foreground="gray")
+
+        def _clear_file_placeholder(event):
+            if self.file_entry.get() == FILE_PLACEHOLDER:
+                self.file_entry.delete(0, END)
+                self.file_entry.configure(foreground="black")
+
+        def _restore_file_placeholder(event):
+            if not self.file_entry.get().strip():
+                self.file_entry.insert(0, FILE_PLACEHOLDER)
+                self.file_entry.configure(foreground="gray")
+
+        self.file_entry.bind("<FocusIn>", _clear_file_placeholder)
+        self.file_entry.bind("<FocusOut>", _restore_file_placeholder)
+
 
 
         ttk.Button(file_row, text="Browse",
@@ -460,9 +496,14 @@ class App(ttk.Window):
     # Main run
     # ==================================================
     def run(self):
-        text = self.manual_text.get("1.0", END)
-        if text.strip() == MANUAL_PLACEHOLDER.strip():
-            raise ValueError("Please enter coordinate data before transforming.")
+        if self.mode.get() == "manual":
+            text = self.manual_text.get("1.0", END)
+            if text.strip() == MANUAL_PLACEHOLDER.strip():
+                raise ValueError("Please enter coordinate data before transforming.")
+        else:
+            path = self.file_entry.get().strip()
+            if not path or path == ".csv, .xlsx, .txt":
+                raise ValueError("Please select a valid input file.")
 
         try:
             self._sync_output_checkboxes()
@@ -538,12 +579,9 @@ class App(ttk.Window):
                     lat = df_all["WGS84_Lat"].apply(fmt_latlon)
                     lon = df_all["WGS84_Lon"].apply(fmt_latlon)
 
-                if order == "LONLAT":
-                    df_out["WGS84_Lon"] = lon
-                    df_out["WGS84_Lat"] = lat
-                else:
-                    df_out["WGS84_Lat"] = lat
-                    df_out["WGS84_Lon"] = lon
+                df_out["WGS84_Lat"] = lat
+                df_out["WGS84_Lon"] = lon
+
 
 
             # ---------- UTM ----------
@@ -604,11 +642,12 @@ class App(ttk.Window):
 
         export_to_kml(
             filepath=path,
-            names=self.df_out.get("Point", []),
-            lats=self.df_out["WGS84_Lat"],
-            lons=self.df_out["WGS84_Lon"],
+            names=self.df_out["Point"],
+            lats=self.df_out["WGS84_Lat"].astype(float),
+            lons=self.df_out["WGS84_Lon"].astype(float),
             crs_name=self.src_crs.get()
         )
+
 
         messagebox.showinfo(
             "Export Complete",

@@ -1,0 +1,13 @@
+<?xml version='1.0' encoding='utf-8'?>
+<kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>Coordinate Export</name><description>Exported from UTM45</description><Placemark><name>ARP03</name><description>Latitude: 27.69600252
+Longitude: 85.360592</description><Point><coordinates>85.360592,27.69600252,0</coordinates></Point></Placemark><Placemark><name>ARP01</name><description>Latitude: 27.69795784
+Longitude: 85.35669817</description><Point><coordinates>85.35669817,27.69795784,0</coordinates></Point></Placemark><Placemark><name>ARP02</name><description>Latitude: 27.69901105
+Longitude: 85.36133327</description><Point><coordinates>85.36133327,27.69901105,0</coordinates></Point></Placemark><Placemark><name>ACP4</name><description>Latitude: 27.70981803
+Longitude: 85.36453241</description><Point><coordinates>85.36453241,27.70981803,0</coordinates></Point></Placemark><Placemark><name>HAN01</name><description>Latitude: 27.70600515
+Longitude: 85.36845145</description><Point><coordinates>85.36845145,27.70600515,0</coordinates></Point></Placemark><Placemark><name>HAN02</name><description>Latitude: 27.69654097
+Longitude: 85.36574786</description><Point><coordinates>85.36574786,27.69654097,0</coordinates></Point></Placemark><Placemark><name>YC20</name><description>Latitude: 27.67878233
+Longitude: 85.35105755</description><Point><coordinates>85.35105755,27.67878233,0</coordinates></Point></Placemark><Placemark><name>JZ001</name><description>Latitude: 27.6855431
+Longitude: 85.35005041</description><Point><coordinates>85.35005041,27.6855431,0</coordinates></Point></Placemark><Placemark><name>AVIC2</name><description>Latitude: 27.71103327
+Longitude: 85.36001762</description><Point><coordinates>85.36001762,27.71103327,0</coordinates></Point></Placemark><Placemark><name>AVIC3</name><description>Latitude: 27.70866249
+Longitude: 85.35634208</description><Point><coordinates>85.35634208,27.70866249,0</coordinates></Point></Placemark><Placemark><name>Helipad B</name><description>Latitude: 27.69995909
+Longitude: 85.36331537</description><Point><coordinates>85.36331537,27.69995909,0</coordinates></Point></Placemark></Document></kml>
